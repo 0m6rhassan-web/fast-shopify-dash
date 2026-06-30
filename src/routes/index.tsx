@@ -11,6 +11,8 @@ import {
   RefreshCw,
   Sparkles,
   Upload,
+  Download,
+  FileSpreadsheet,
   X,
   Check,
 } from "lucide-react";
@@ -20,6 +22,8 @@ import {
   updateProduct,
   aiSuggest,
   matchCsvWithAI,
+  exportProductsCsv,
+  applyCsvUpdates,
   type AdminProduct,
   type AdminVariant,
   type ProductUpdateInput,
