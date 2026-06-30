@@ -91,6 +91,7 @@ function ProductsDashboard() {
   const [stockFilter, setStockFilter] = useState<"all" | "in" | "low" | "out">("all");
   const [editing, setEditing] = useState<AdminProduct | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   const listFn = useServerFn(listProducts);
   const query = useQuery({
