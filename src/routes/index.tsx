@@ -854,3 +854,175 @@ function BulkAiDialog({
     </Dialog>
   );
 }
+
+// ---------------- Direct CSV sheet (export / edit / re-upload) ----------------
+
+function SheetDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const qc = useQueryClient();
+  const exportFn = useServerFn(exportProductsCsv);
+  const applyFn = useServerFn(applyCsvUpdates);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [maxRows, setMaxRows] = useState("500");
+  const [result, setResult] = useState<{
+    ok: number;
+    failed: number;
+    total: number;
+    errors: Array<{ productId: string; message: string }>;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!open) setResult(null);
+  }, [open]);
+
+  const exportMut = useMutation({
+    mutationFn: async () => exportFn({ data: { max: parseInt(maxRows, 10) || 500 } }),
+    onSuccess: (res) => {
+      const blob = new Blob(["\uFEFF" + res.csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const ts = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `shopify-products-${ts}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`تم تنزيل الشيت — ${res.productCount} منتج (${res.rowCount} صف)`);
+    },
+    onError: (e: Error) => toast.error("فشل التصدير", { description: e.message }),
+  });
+
+  const applyMut = useMutation({
+    mutationFn: async (csvText: string) => applyFn({ data: { csvText } }),
+    onSuccess: (res) => {
+      setResult(res);
+      qc.invalidateQueries({ queryKey: ["products"] });
+      if (res.failed === 0) toast.success(`تم تحديث ${res.ok} منتج بنجاح`);
+      else toast.warning(`نجح ${res.ok} — فشل ${res.failed}`);
+    },
+    onError: (e: Error) => toast.error("فشل التطبيق", { description: e.message }),
+  });
+
+  const onFile = async (file: File) => {
+    const text = await file.text();
+    applyMut.mutate(text);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent dir="rtl" className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>شيت التعديلات (CSV)</DialogTitle>
+          <DialogDescription>
+            نزّل شيت بكل المنتجات، عدّل اللي عايزه في Excel أو Google Sheets، ثم ارفعه تاني — التعديلات تتطبق مباشرة في Shopify.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-5 py-2">
+          <div className="rounded-lg border p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <Download className="size-4 text-primary" />
+              <h3 className="font-medium">1. تنزيل الشيت</h3>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              الشيت بيحتوي على: العنوان، الوصف، المورد، النوع، الحالة، الوسوم، SEO، وكل المتغيرات (سعر، SKU، مخزن).
+              عدّل أي خانة — لا تغيّر أعمدة <code>product_id</code> و <code>variant_id</code> و <code>inventory_item_id</code>.
+            </p>
+            <div className="flex items-end gap-2">
+              <div className="space-y-1.5 flex-1 max-w-[160px]">
+                <Label htmlFor="max" className="text-xs">عدد المنتجات الأقصى</Label>
+                <Input
+                  id="max"
+                  type="number"
+                  min={1}
+                  max={2000}
+                  value={maxRows}
+                  onChange={(e) => setMaxRows(e.target.value)}
+                />
+              </div>
+              <Button onClick={() => exportMut.mutate()} disabled={exportMut.isPending}>
+                {exportMut.isPending ? (
+                  <Loader2 className="size-4 animate-spin ml-2" />
+                ) : (
+                  <Download className="size-4 ml-2" />
+                )}
+                تنزيل CSV
+              </Button>
+            </div>
+          </div>
+
+          <div className="rounded-lg border p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <Upload className="size-4 text-primary" />
+              <h3 className="font-medium">2. رفع الشيت المعدّل</h3>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              التطبيق مباشر بدون مراجعة — التغييرات بتروح Shopify فوراً.
+            </p>
+            <div
+              className="border-2 border-dashed rounded-md p-6 text-center cursor-pointer hover:bg-muted/50 transition-colors"
+              onClick={() => !applyMut.isPending && fileRef.current?.click()}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                const f = e.dataTransfer.files[0];
+                if (f && !applyMut.isPending) onFile(f);
+              }}
+            >
+              {applyMut.isPending ? (
+                <>
+                  <Loader2 className="size-6 mx-auto animate-spin text-primary mb-2" />
+                  <p className="text-sm">جاري تطبيق التعديلات...</p>
+                </>
+              ) : (
+                <>
+                  <Upload className="size-6 mx-auto text-muted-foreground mb-2" />
+                  <p className="text-sm font-medium">اضغط لاختيار شيت CSV أو اسحبه هنا</p>
+                </>
+              )}
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
+              />
+            </div>
+          </div>
+
+          {result && (
+            <div className="rounded-lg border p-4 space-y-2">
+              <h3 className="font-medium text-sm">نتيجة التطبيق</h3>
+              <div className="flex gap-4 text-sm">
+                <span className="text-emerald-700">✓ نجح: {result.ok}</span>
+                {result.failed > 0 && (
+                  <span className="text-destructive">✗ فشل: {result.failed}</span>
+                )}
+                <span className="text-muted-foreground">من إجمالي {result.total}</span>
+              </div>
+              {result.errors.length > 0 && (
+                <div className="text-xs space-y-1 max-h-32 overflow-y-auto">
+                  {result.errors.map((er, i) => (
+                    <div key={i} className="text-destructive">
+                      <code className="text-[10px]">{er.productId.slice(-12)}</code>: {er.message}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            إغلاق
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
