@@ -126,10 +126,14 @@ function ProductsDashboard() {
               <p className="text-xs text-muted-foreground">إدارة منتجات Shopify مع مساعد AI</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="default" size="sm" onClick={() => setBulkOpen(true)}>
-              <Upload className="size-4 ml-2" />
-              تحديث جماعي بـ AI
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button variant="default" size="sm" onClick={() => setSheetOpen(true)}>
+              <FileSpreadsheet className="size-4 ml-2" />
+              شيت التعديلات
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setBulkOpen(true)}>
+              <Sparkles className="size-4 ml-2" />
+              AI من CSV
             </Button>
             <Button
               variant="outline"
