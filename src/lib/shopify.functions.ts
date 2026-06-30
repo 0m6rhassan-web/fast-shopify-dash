@@ -392,3 +392,266 @@ ${JSON.stringify(catalog)}
       catalogSize: catalog.length,
     };
   });
+
+// ---------------- Export / Import CSV (direct, no AI) ----------------
+
+const CSV_HEADERS = [
+  "product_id",
+  "variant_id",
+  "inventory_item_id",
+  "handle",
+  "title",
+  "vendor",
+  "product_type",
+  "status",
+  "tags",
+  "seo_title",
+  "seo_description",
+  "description_html",
+  "variant_title",
+  "sku",
+  "price",
+  "compare_at_price",
+  "inventory_quantity",
+] as const;
+
+export const exportProductsCsv = createServerFn({ method: "POST" })
+  .inputValidator((data: { search?: string; max?: number } | undefined) => data ?? {})
+  .handler(async ({ data }) => {
+    const { adminGraphQL } = await import("./shopify-admin.server");
+    const Papa = (await import("papaparse")).default;
+    const max = Math.min(data.max ?? 500, 2000);
+    const search = (data.search ?? "").trim();
+    const query = search
+      ? `title:*${search.replace(/"/g, '\\"')}* OR sku:*${search.replace(/"/g, '\\"')}*`
+      : null;
+
+    const rows: Record<string, string | number> [] = [];
+    let after: string | null = null;
+    while (rows.length < max) {
+      const pageSize = Math.min(50, max - rows.length);
+      const res: any = await adminGraphQL<any>(LIST_QUERY, { first: pageSize, query, after });
+      for (const e of res.products.edges) {
+        const p = mapProduct(e.node);
+        if (p.variants.length === 0) {
+          rows.push({
+            product_id: p.id,
+            variant_id: "",
+            inventory_item_id: "",
+            handle: p.handle,
+            title: p.title,
+            vendor: p.vendor,
+            product_type: p.productType,
+            status: p.status,
+            tags: p.tags.join(", "),
+            seo_title: p.seoTitle,
+            seo_description: p.seoDescription,
+            description_html: p.descriptionHtml,
+            variant_title: "",
+            sku: "",
+            price: "",
+            compare_at_price: "",
+            inventory_quantity: "",
+          });
+        } else {
+          for (const v of p.variants) {
+            rows.push({
+              product_id: p.id,
+              variant_id: v.id,
+              inventory_item_id: v.inventoryItemId ?? "",
+              handle: p.handle,
+              title: p.title,
+              vendor: p.vendor,
+              product_type: p.productType,
+              status: p.status,
+              tags: p.tags.join(", "),
+              seo_title: p.seoTitle,
+              seo_description: p.seoDescription,
+              description_html: p.descriptionHtml,
+              variant_title: v.title,
+              sku: v.sku ?? "",
+              price: v.price,
+              compare_at_price: v.compareAtPrice ?? "",
+              inventory_quantity: v.inventoryQuantity,
+            });
+          }
+        }
+      }
+      if (!res.products.pageInfo.hasNextPage) break;
+      after = res.products.pageInfo.endCursor;
+    }
+
+    const csv = Papa.unparse(rows, { columns: [...CSV_HEADERS] });
+    return { csv, productCount: new Set(rows.map((r) => r.product_id)).size, rowCount: rows.length };
+  });
+
+type CsvUpdateRow = Record<string, string>;
+
+export const applyCsvUpdates = createServerFn({ method: "POST" })
+  .inputValidator((data: { csvText: string }) => data)
+  .handler(async ({ data }) => {
+    const Papa = (await import("papaparse")).default;
+    const parsed = Papa.parse<CsvUpdateRow>(data.csvText, {
+      header: true,
+      skipEmptyLines: true,
+    });
+    const rows = parsed.data ?? [];
+    if (!rows.length) throw new Error("ملف CSV فارغ");
+
+    // Group by product_id
+    const byProduct = new Map<string, CsvUpdateRow[]>();
+    for (const r of rows) {
+      const pid = (r.product_id || "").trim();
+      if (!pid) continue;
+      const list = byProduct.get(pid) ?? [];
+      list.push(r);
+      byProduct.set(pid, list);
+    }
+    if (!byProduct.size) throw new Error("لا توجد صفوف صالحة (product_id مفقود)");
+
+    const get = (r: CsvUpdateRow, k: string) =>
+      r[k] !== undefined && r[k] !== null ? String(r[k]) : undefined;
+
+    let ok = 0;
+    let failed = 0;
+    const errors: Array<{ productId: string; message: string }> = [];
+
+    for (const [productId, group] of byProduct) {
+      const first = group[0];
+      const payload: ProductUpdateInput = { productId };
+
+      const title = get(first, "title");
+      if (title !== undefined && title !== "") payload.title = title;
+      const desc = get(first, "description_html");
+      if (desc !== undefined) payload.descriptionHtml = desc;
+      const vendor = get(first, "vendor");
+      if (vendor !== undefined) payload.vendor = vendor;
+      const ptype = get(first, "product_type");
+      if (ptype !== undefined) payload.productType = ptype;
+      const status = get(first, "status");
+      if (status && ["ACTIVE", "DRAFT", "ARCHIVED"].includes(status.toUpperCase())) {
+        payload.status = status.toUpperCase() as any;
+      }
+      const tags = get(first, "tags");
+      if (tags !== undefined) {
+        payload.tags = tags.split(",").map((s) => s.trim()).filter(Boolean);
+      }
+      const seoT = get(first, "seo_title");
+      if (seoT !== undefined) payload.seoTitle = seoT;
+      const seoD = get(first, "seo_description");
+      if (seoD !== undefined) payload.seoDescription = seoD;
+
+      const vChanges: VariantUpdateInput[] = [];
+      for (const r of group) {
+        const vid = get(r, "variant_id");
+        if (!vid) continue;
+        const ch: VariantUpdateInput = { id: vid };
+        let changed = false;
+        const price = get(r, "price");
+        if (price) {
+          ch.price = price;
+          changed = true;
+        }
+        const cap = get(r, "compare_at_price");
+        if (cap !== undefined) {
+          ch.compareAtPrice = cap === "" ? null : cap;
+          changed = true;
+        }
+        const sku = get(r, "sku");
+        if (sku !== undefined) {
+          ch.sku = sku;
+          changed = true;
+        }
+        const qty = get(r, "inventory_quantity");
+        const iid = get(r, "inventory_item_id");
+        if (qty !== undefined && qty !== "" && iid) {
+          const n = parseInt(qty, 10);
+          if (!Number.isNaN(n)) {
+            ch.inventoryQuantity = n;
+            ch.inventoryItemId = iid;
+            changed = true;
+          }
+        }
+        if (changed) vChanges.push(ch);
+      }
+      if (vChanges.length) payload.variants = vChanges;
+
+      try {
+        // Reuse update logic via direct calls
+        const { adminGraphQL, getPrimaryLocationId } = await import("./shopify-admin.server");
+        const hasProductFields =
+          payload.title !== undefined ||
+          payload.descriptionHtml !== undefined ||
+          payload.vendor !== undefined ||
+          payload.productType !== undefined ||
+          payload.status !== undefined ||
+          payload.tags !== undefined ||
+          payload.seoTitle !== undefined ||
+          payload.seoDescription !== undefined;
+
+        if (hasProductFields) {
+          const input: Record<string, any> = { id: productId };
+          if (payload.title !== undefined) input.title = payload.title;
+          if (payload.descriptionHtml !== undefined) input.descriptionHtml = payload.descriptionHtml;
+          if (payload.vendor !== undefined) input.vendor = payload.vendor;
+          if (payload.productType !== undefined) input.productType = payload.productType;
+          if (payload.status !== undefined) input.status = payload.status;
+          if (payload.tags !== undefined) input.tags = payload.tags;
+          if (payload.seoTitle !== undefined || payload.seoDescription !== undefined) {
+            input.seo = {
+              ...(payload.seoTitle !== undefined ? { title: payload.seoTitle } : {}),
+              ...(payload.seoDescription !== undefined ? { description: payload.seoDescription } : {}),
+            };
+          }
+          const r = await adminGraphQL<any>(PRODUCT_UPDATE, { input });
+          const errs = r.productUpdate?.userErrors ?? [];
+          if (errs.length) throw new Error(errs.map((e: any) => e.message).join(", "));
+        }
+        if (payload.variants?.length) {
+          const variantPayloads = payload.variants
+            .map((v) => {
+              const o: any = { id: v.id };
+              if (v.price !== undefined) o.price = v.price;
+              if (v.compareAtPrice !== undefined) o.compareAtPrice = v.compareAtPrice;
+              if (v.sku !== undefined) o.inventoryItem = { sku: v.sku };
+              return Object.keys(o).length > 1 ? o : null;
+            })
+            .filter(Boolean);
+          if (variantPayloads.length) {
+            const r = await adminGraphQL<any>(VARIANT_BULK_UPDATE, {
+              productId,
+              variants: variantPayloads,
+            });
+            const errs = r.productVariantsBulkUpdate?.userErrors ?? [];
+            if (errs.length) throw new Error(errs.map((e: any) => e.message).join(", "));
+          }
+          const invUpdates = payload.variants.filter(
+            (v) => v.inventoryQuantity !== undefined && v.inventoryItemId,
+          );
+          if (invUpdates.length) {
+            const locationId = await getPrimaryLocationId();
+            const r = await adminGraphQL<any>(INVENTORY_SET, {
+              input: {
+                name: "available",
+                reason: "correction",
+                ignoreCompareQuantity: true,
+                quantities: invUpdates.map((v) => ({
+                  inventoryItemId: v.inventoryItemId!,
+                  locationId,
+                  quantity: Math.max(0, Math.floor(v.inventoryQuantity!)),
+                })),
+              },
+            });
+            const errs = r.inventorySetQuantities?.userErrors ?? [];
+            if (errs.length) throw new Error(errs.map((e: any) => e.message).join(", "));
+          }
+        }
+        ok++;
+      } catch (e: any) {
+        failed++;
+        errors.push({ productId, message: e?.message ?? String(e) });
+      }
+    }
+
+    return { ok, failed, total: byProduct.size, errors: errors.slice(0, 20) };
+  });
