@@ -430,7 +430,7 @@ export const exportProductsCsv = createServerFn({ method: "POST" })
     let after: string | null = null;
     while (rows.length < max) {
       const pageSize = Math.min(50, max - rows.length);
-      const res = await adminGraphQL<any>(LIST_QUERY, { first: pageSize, query, after });
+      const res: any = await adminGraphQL<any>(LIST_QUERY, { first: pageSize, query, after });
       for (const e of res.products.edges) {
         const p = mapProduct(e.node);
         if (p.variants.length === 0) {
