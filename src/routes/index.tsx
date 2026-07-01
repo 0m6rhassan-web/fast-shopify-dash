@@ -15,6 +15,11 @@ import {
   FileSpreadsheet,
   X,
   Check,
+  Percent,
+  Settings2,
+  Tag,
+  Trash2,
+  Plus,
 } from "lucide-react";
 
 import {
@@ -24,11 +29,17 @@ import {
   matchCsvWithAI,
   exportProductsCsv,
   applyCsvUpdates,
+  listProductMetafields,
+  saveProductMetafields,
+  bulkAdjustPrices,
+  previewSpecPricing,
   type AdminProduct,
   type AdminVariant,
   type ProductUpdateInput,
   type VariantUpdateInput,
   type BulkSuggestion,
+  type ProductMetafield,
+  type SpecRules,
 } from "@/lib/shopify.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -92,6 +103,7 @@ function ProductsDashboard() {
   const [editing, setEditing] = useState<AdminProduct | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [pricingOpen, setPricingOpen] = useState(false);
 
   const listFn = useServerFn(listProducts);
   const query = useQuery({
@@ -127,6 +139,10 @@ function ProductsDashboard() {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            <Button variant="default" size="sm" onClick={() => setPricingOpen(true)}>
+              <Percent className="size-4 ml-2" />
+              أدوات التسعير
+            </Button>
             <Button variant="default" size="sm" onClick={() => setSheetOpen(true)}>
               <FileSpreadsheet className="size-4 ml-2" />
               شيت التعديلات
@@ -233,6 +249,7 @@ function ProductsDashboard() {
       <EditDialog product={editing} onOpenChange={(o) => !o && setEditing(null)} />
       <BulkAiDialog open={bulkOpen} onOpenChange={setBulkOpen} />
       <SheetDialog open={sheetOpen} onOpenChange={setSheetOpen} />
+      <PricingToolsDialog open={pricingOpen} onOpenChange={setPricingOpen} />
     </div>
   );
 }
@@ -427,13 +444,14 @@ function EditDialog({
         </DialogHeader>
 
         <Tabs defaultValue="basic" className="mt-2">
-          <TabsList className="grid grid-cols-4 w-full">
+          <TabsList className="grid grid-cols-5 w-full">
             <TabsTrigger value="basic">الأساسي</TabsTrigger>
             <TabsTrigger value="variants">
               المتغيرات {variants.length > 1 ? `(${variants.length})` : ""}
             </TabsTrigger>
             <TabsTrigger value="tags">Tags &amp; بيانات</TabsTrigger>
             <TabsTrigger value="seo">SEO</TabsTrigger>
+            <TabsTrigger value="meta">Metafields</TabsTrigger>
           </TabsList>
 
           <TabsContent value="basic" className="space-y-4 mt-4">
@@ -633,6 +651,10 @@ function EditDialog({
               />
               <p className="text-xs text-muted-foreground">{seoDesc.length}/160 حرف</p>
             </div>
+          </TabsContent>
+
+          <TabsContent value="meta" className="mt-4">
+            {product && <MetafieldsPanel productId={product.id} />}
           </TabsContent>
         </Tabs>
 
@@ -1024,5 +1046,565 @@ function SheetDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ============================================================
+// Metafields Panel (in Edit dialog)
+// ============================================================
+
+type MFRow = ProductMetafield & { _dirty?: boolean; _new?: boolean; _delete?: boolean; _localId: string };
+
+function MetafieldsPanel({ productId }: { productId: string }) {
+  const qc = useQueryClient();
+  const listFn = useServerFn(listProductMetafields);
+  const saveFn = useServerFn(saveProductMetafields);
+  const [rows, setRows] = useState<MFRow[]>([]);
+  const q = useQuery({
+    queryKey: ["metafields", productId],
+    queryFn: () => listFn({ data: { productId } }),
+  });
+  useEffect(() => {
+    if (q.data) {
+      setRows(
+        q.data.metafields.map((m, i) => ({
+          ...m,
+          _localId: m.id ?? `srv-${i}`,
+        })),
+      );
+    }
+  }, [q.data]);
+
+  const patch = (id: string, p: Partial<MFRow>) =>
+    setRows((rs) => rs.map((r) => (r._localId === id ? { ...r, ...p, _dirty: true } : r)));
+
+  const addRow = () =>
+    setRows((rs) => [
+      ...rs,
+      {
+        _localId: `new-${Date.now()}-${rs.length}`,
+        id: null,
+        namespace: "custom",
+        key: "",
+        type: "single_line_text_field",
+        value: "",
+        _new: true,
+        _dirty: true,
+      },
+    ]);
+
+  const saveMut = useMutation({
+    mutationFn: async () => {
+      const upserts = rows
+        .filter((r) => !r._delete && r._dirty && r.key && r.namespace)
+        .map((r) => ({ namespace: r.namespace, key: r.key, type: r.type, value: r.value }));
+      const deletes = rows.filter((r) => r._delete && r.id).map((r) => r.id!) as string[];
+      return saveFn({ data: { productId, upserts, deletes } });
+    },
+    onSuccess: () => {
+      toast.success("تم حفظ الـ metafields");
+      qc.invalidateQueries({ queryKey: ["metafields", productId] });
+    },
+    onError: (e: Error) => toast.error("فشل الحفظ", { description: e.message }),
+  });
+
+  if (q.isLoading) {
+    return (
+      <div className="py-8 grid place-items-center text-muted-foreground">
+        <Loader2 className="size-5 animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        Metafields للمنتج — استخدم namespace ثابت مثل <code>custom</code> ومفاتيح فريدة.
+      </p>
+      <div className="border rounded-md overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="text-right w-28">Namespace</TableHead>
+              <TableHead className="text-right w-32">Key</TableHead>
+              <TableHead className="text-right w-40">النوع</TableHead>
+              <TableHead className="text-right">القيمة</TableHead>
+              <TableHead className="w-10"></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5} className="text-center text-sm text-muted-foreground py-6">
+                  لا يوجد metafields. اضغط "إضافة" لإنشاء واحد.
+                </TableCell>
+              </TableRow>
+            )}
+            {rows.map((r) => (
+              <TableRow key={r._localId} className={r._delete ? "opacity-40 line-through" : ""}>
+                <TableCell>
+                  <Input
+                    className="h-8"
+                    value={r.namespace}
+                    disabled={!!r.id}
+                    onChange={(e) => patch(r._localId, { namespace: e.target.value })}
+                  />
+                </TableCell>
+                <TableCell>
+                  <Input
+                    className="h-8"
+                    value={r.key}
+                    disabled={!!r.id}
+                    onChange={(e) => patch(r._localId, { key: e.target.value })}
+                  />
+                </TableCell>
+                <TableCell>
+                  <Select
+                    value={r.type}
+                    onValueChange={(v) => patch(r._localId, { type: v })}
+                    disabled={!!r.id}
+                  >
+                    <SelectTrigger className="h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="single_line_text_field">نص قصير</SelectItem>
+                      <SelectItem value="multi_line_text_field">نص طويل</SelectItem>
+                      <SelectItem value="number_integer">رقم صحيح</SelectItem>
+                      <SelectItem value="number_decimal">رقم عشري</SelectItem>
+                      <SelectItem value="boolean">صواب/خطأ</SelectItem>
+                      <SelectItem value="json">JSON</SelectItem>
+                      <SelectItem value="url">رابط</SelectItem>
+                      <SelectItem value="color">لون</SelectItem>
+                      <SelectItem value="date">تاريخ</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </TableCell>
+                <TableCell>
+                  {r.type === "multi_line_text_field" || r.type === "json" ? (
+                    <Textarea
+                      rows={2}
+                      className="text-sm"
+                      value={r.value}
+                      onChange={(e) => patch(r._localId, { value: e.target.value })}
+                    />
+                  ) : (
+                    <Input
+                      className="h-8"
+                      value={r.value}
+                      onChange={(e) => patch(r._localId, { value: e.target.value })}
+                    />
+                  )}
+                </TableCell>
+                <TableCell>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="size-7 text-destructive"
+                    onClick={() => patch(r._localId, { _delete: !r._delete })}
+                    title={r._delete ? "إلغاء الحذف" : "حذف"}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <div className="flex justify-between items-center">
+        <Button size="sm" variant="outline" onClick={addRow}>
+          <Plus className="size-3.5 ml-1" />
+          إضافة metafield
+        </Button>
+        <Button size="sm" onClick={() => saveMut.mutate()} disabled={saveMut.isPending}>
+          {saveMut.isPending && <Loader2 className="size-3.5 animate-spin ml-1" />}
+          حفظ الـ metafields
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// Pricing Tools Dialog (% raise + spec pricing rules)
+// ============================================================
+
+const SPEC_RULES_KEY = "shopify_spec_rules_v1";
+const DEFAULT_SPEC_RULES: SpecRules = {
+  RAM: [
+    { value: "8G", price: 1500, isDefault: true },
+    { value: "16G", price: 3000 },
+    { value: "32G", price: 6000 },
+  ],
+  SSD: [
+    { value: "256G", price: 1500, isDefault: true },
+    { value: "512G", price: 2700 },
+    { value: "1T", price: 5000 },
+  ],
+};
+
+function loadSpecRules(): SpecRules {
+  try {
+    const raw = localStorage.getItem(SPEC_RULES_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return DEFAULT_SPEC_RULES;
+}
+
+function PricingToolsDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent dir="rtl" className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>أدوات التسعير الجماعية</DialogTitle>
+          <DialogDescription>
+            رفع أسعار كل الأجهزة بنسبة %، أو تطبيق قواعد أسعار الرامات والهاردات على كل المنتجات.
+          </DialogDescription>
+        </DialogHeader>
+        <Tabs defaultValue="percent" className="mt-2">
+          <TabsList className="grid grid-cols-2 w-full">
+            <TabsTrigger value="percent">رفع الأسعار %</TabsTrigger>
+            <TabsTrigger value="specs">قواعد الرامات والهاردات</TabsTrigger>
+          </TabsList>
+          <TabsContent value="percent" className="mt-4">
+            <BulkPercentPanel onDone={() => onOpenChange(false)} />
+          </TabsContent>
+          <TabsContent value="specs" className="mt-4">
+            <SpecRulesPanel />
+          </TabsContent>
+        </Tabs>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function BulkPercentPanel({ onDone }: { onDone: () => void }) {
+  const qc = useQueryClient();
+  const fn = useServerFn(bulkAdjustPrices);
+  const [percent, setPercent] = useState("10");
+  const [search, setSearch] = useState("");
+  const [roundTo, setRoundTo] = useState("0");
+  const [max, setMax] = useState("500");
+  const [result, setResult] = useState<Awaited<ReturnType<typeof fn>> | null>(null);
+
+  const mut = useMutation({
+    mutationFn: async () =>
+      fn({
+        data: {
+          percent: parseFloat(percent) || 0,
+          search: search.trim() || undefined,
+          roundTo: parseFloat(roundTo) || 0,
+          max: parseInt(max, 10) || 500,
+        },
+      }),
+    onSuccess: (r) => {
+      setResult(r);
+      qc.invalidateQueries({ queryKey: ["products"] });
+      toast.success(`تم تحديث ${r.updatedProducts} منتج (${r.updatedVariants} متغير)`);
+    },
+    onError: (e: Error) => toast.error("فشل", { description: e.message }),
+  });
+
+  const confirmRun = () => {
+    const p = parseFloat(percent) || 0;
+    if (!p) return toast.error("أدخل نسبة صحيحة");
+    if (!confirm(`ستُعدَّل أسعار حتى ${max} منتج بنسبة ${p}%. هل تريد المتابعة؟`)) return;
+    mut.mutate();
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label>النسبة % (سالب للتخفيض)</Label>
+          <Input
+            type="number"
+            value={percent}
+            onChange={(e) => setPercent(e.target.value)}
+            placeholder="مثال: 10"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label>تقريب لأقرب (اختياري)</Label>
+          <Input
+            type="number"
+            value={roundTo}
+            onChange={(e) => setRoundTo(e.target.value)}
+            placeholder="0 = بدون تقريب"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label>بحث (اختياري)</Label>
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="فلترة بعنوان/SKU"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label>عدد المنتجات الأقصى</Label>
+          <Input type="number" value={max} onChange={(e) => setMax(e.target.value)} />
+        </div>
+      </div>
+      <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800">
+        ⚠️ التعديل مباشر في Shopify — تأكد قبل التنفيذ. لا يوجد تراجع تلقائي.
+      </div>
+      {result && (
+        <div className="rounded-lg border p-4 space-y-2 text-sm">
+          <div className="flex gap-4">
+            <span className="text-emerald-700">✓ منتجات: {result.updatedProducts}</span>
+            <span className="text-emerald-700">✓ متغيرات: {result.updatedVariants}</span>
+            {result.failed > 0 && (
+              <span className="text-destructive">✗ فشل: {result.failed}</span>
+            )}
+            <span className="text-muted-foreground">من {result.processed} مفحوص</span>
+          </div>
+          {result.errors.length > 0 && (
+            <div className="text-xs space-y-1 max-h-32 overflow-y-auto">
+              {result.errors.map((e, i) => (
+                <div key={i} className="text-destructive">
+                  {e.message}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      <DialogFooter>
+        <Button variant="outline" onClick={onDone} disabled={mut.isPending}>
+          إغلاق
+        </Button>
+        <Button onClick={confirmRun} disabled={mut.isPending}>
+          {mut.isPending && <Loader2 className="size-4 animate-spin ml-2" />}
+          <Percent className="size-4 ml-2" />
+          طبّق على المنتجات
+        </Button>
+      </DialogFooter>
+    </div>
+  );
+}
+
+function SpecRulesPanel() {
+  const qc = useQueryClient();
+  const previewFn = useServerFn(previewSpecPricing);
+  const [rules, setRules] = useState<SpecRules>(() => loadSpecRules());
+  const [search, setSearch] = useState("");
+  const [max, setMax] = useState("500");
+  const [preview, setPreview] = useState<Awaited<ReturnType<typeof previewFn>> | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SPEC_RULES_KEY, JSON.stringify(rules));
+    } catch {}
+  }, [rules]);
+
+  const updateVal = (opt: string, idx: number, patch: Partial<SpecRules[string][number]>) => {
+    setRules((r) => ({
+      ...r,
+      [opt]: r[opt].map((v, i) => (i === idx ? { ...v, ...patch } : v)),
+    }));
+  };
+  const addVal = (opt: string) =>
+    setRules((r) => ({ ...r, [opt]: [...(r[opt] ?? []), { value: "", price: 0 }] }));
+  const delVal = (opt: string, idx: number) =>
+    setRules((r) => ({ ...r, [opt]: r[opt].filter((_, i) => i !== idx) }));
+  const setDefault = (opt: string, idx: number) =>
+    setRules((r) => ({
+      ...r,
+      [opt]: r[opt].map((v, i) => ({ ...v, isDefault: i === idx })),
+    }));
+  const addOpt = () => {
+    const name = prompt("اسم الخيار (مثال: Screen)");
+    if (!name) return;
+    setRules((r) => ({ ...r, [name]: [{ value: "", price: 0, isDefault: true }] }));
+  };
+  const delOpt = (opt: string) => {
+    if (!confirm(`حذف خيار "${opt}" كله؟`)) return;
+    setRules((r) => {
+      const nr = { ...r };
+      delete nr[opt];
+      return nr;
+    });
+  };
+
+  const previewMut = useMutation({
+    mutationFn: async (apply: boolean) =>
+      previewFn({
+        data: {
+          rules,
+          search: search.trim() || undefined,
+          max: parseInt(max, 10) || 500,
+          apply,
+        },
+      }),
+    onSuccess: (r) => {
+      setPreview(r);
+      if (r.applied) {
+        qc.invalidateQueries({ queryKey: ["products"] });
+        toast.success(`تم تطبيق التسعير على ${r.updatedProducts} منتج`);
+      } else {
+        toast.info(`معاينة: ${r.totalAffectedProducts} منتج سيتم تعديله`);
+      }
+    },
+    onError: (e: Error) => toast.error("فشل", { description: e.message }),
+  });
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-muted-foreground">
+        القواعد بتتخزن في المتصفح. لكل خيار (RAM/SSD…) عرّف القيم وأسعارها، وحدد القيمة "الافتراضية" اللي بتكون في الجهاز الأساسي.
+        سعر أي متغير = <b>سعر الجهاز الأساسي</b> + (سعر السبيك المختار − سعر السبيك الافتراضي).
+      </p>
+
+      <div className="space-y-3">
+        {Object.keys(rules).map((opt) => (
+          <div key={opt} className="border rounded-md p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Tag className="size-4 text-primary" />
+                <h4 className="font-medium">{opt}</h4>
+              </div>
+              <Button size="icon" variant="ghost" className="size-7 text-destructive" onClick={() => delOpt(opt)}>
+                <Trash2 className="size-3.5" />
+              </Button>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-right">القيمة</TableHead>
+                  <TableHead className="text-right">السعر</TableHead>
+                  <TableHead className="text-right">افتراضي</TableHead>
+                  <TableHead className="w-10"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rules[opt].map((v, i) => (
+                  <TableRow key={i}>
+                    <TableCell>
+                      <Input
+                        className="h-8"
+                        value={v.value}
+                        onChange={(e) => updateVal(opt, i, { value: e.target.value })}
+                        placeholder="8G"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        className="h-8 w-28"
+                        type="number"
+                        value={v.price}
+                        onChange={(e) => updateVal(opt, i, { price: parseFloat(e.target.value) || 0 })}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        size="sm"
+                        variant={v.isDefault ? "default" : "outline"}
+                        onClick={() => setDefault(opt, i)}
+                      >
+                        {v.isDefault ? "✓ افتراضي" : "اجعله افتراضي"}
+                      </Button>
+                    </TableCell>
+                    <TableCell>
+                      <Button size="icon" variant="ghost" className="size-7 text-destructive" onClick={() => delVal(opt, i)}>
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <Button size="sm" variant="outline" onClick={() => addVal(opt)}>
+              <Plus className="size-3.5 ml-1" /> إضافة قيمة
+            </Button>
+          </div>
+        ))}
+      </div>
+      <Button size="sm" variant="outline" onClick={addOpt}>
+        <Plus className="size-3.5 ml-1" /> إضافة خيار جديد
+      </Button>
+
+      <div className="border-t pt-4 space-y-3">
+        <h4 className="font-medium text-sm">التطبيق على المنتجات</h4>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label>بحث (اختياري)</Label>
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>عدد المنتجات الأقصى</Label>
+            <Input type="number" value={max} onChange={(e) => setMax(e.target.value)} />
+          </div>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <Button
+            variant="outline"
+            onClick={() => previewMut.mutate(false)}
+            disabled={previewMut.isPending}
+          >
+            {previewMut.isPending && !previewMut.variables && <Loader2 className="size-4 animate-spin ml-2" />}
+            <Settings2 className="size-4 ml-2" /> معاينة (بدون حفظ)
+          </Button>
+          <Button
+            onClick={() => {
+              if (!confirm("سيتم تعديل أسعار المتغيرات في Shopify فوراً. متابعة؟")) return;
+              previewMut.mutate(true);
+            }}
+            disabled={previewMut.isPending}
+          >
+            {previewMut.isPending && previewMut.variables && <Loader2 className="size-4 animate-spin ml-2" />}
+            <Check className="size-4 ml-2" /> تطبيق على Shopify
+          </Button>
+        </div>
+
+        {preview && (
+          <div className="border rounded-md p-3 space-y-2 text-sm">
+            <div className="flex gap-4 flex-wrap">
+              <span>منتجات متأثرة: <b>{preview.totalAffectedProducts}</b></span>
+              <span>متغيرات: <b>{preview.totalAffectedVariants}</b></span>
+              {preview.applied && (
+                <>
+                  <span className="text-emerald-700">✓ محدَّث: {preview.updatedProducts}</span>
+                  {preview.failed > 0 && (
+                    <span className="text-destructive">✗ فشل: {preview.failed}</span>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="max-h-80 overflow-y-auto border rounded">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-right">المنتج</TableHead>
+                    <TableHead className="text-right">المتغير</TableHead>
+                    <TableHead className="text-right">قديم</TableHead>
+                    <TableHead className="text-right">جديد</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {preview.preview.flatMap((p) =>
+                    p.variantChanges.map((c) => (
+                      <TableRow key={c.variantId}>
+                        <TableCell className="text-xs">{p.productTitle}</TableCell>
+                        <TableCell className="text-xs">{c.options}</TableCell>
+                        <TableCell className="tabular-nums">{c.oldPrice}</TableCell>
+                        <TableCell className="tabular-nums font-medium">{c.newPrice}</TableCell>
+                      </TableRow>
+                    )),
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
