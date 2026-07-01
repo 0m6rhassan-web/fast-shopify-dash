@@ -103,6 +103,7 @@ function ProductsDashboard() {
   const [editing, setEditing] = useState<AdminProduct | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [pricingOpen, setPricingOpen] = useState(false);
 
   const listFn = useServerFn(listProducts);
   const query = useQuery({
