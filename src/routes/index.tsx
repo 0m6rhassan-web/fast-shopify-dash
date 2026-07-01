@@ -139,6 +139,10 @@ function ProductsDashboard() {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            <Button variant="default" size="sm" onClick={() => setPricingOpen(true)}>
+              <Percent className="size-4 ml-2" />
+              أدوات التسعير
+            </Button>
             <Button variant="default" size="sm" onClick={() => setSheetOpen(true)}>
               <FileSpreadsheet className="size-4 ml-2" />
               شيت التعديلات
