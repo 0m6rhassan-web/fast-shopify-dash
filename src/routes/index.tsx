@@ -652,6 +652,10 @@ function EditDialog({
               <p className="text-xs text-muted-foreground">{seoDesc.length}/160 حرف</p>
             </div>
           </TabsContent>
+
+          <TabsContent value="meta" className="mt-4">
+            {product && <MetafieldsPanel productId={product.id} />}
+          </TabsContent>
         </Tabs>
 
         <DialogFooter className="gap-2 sm:gap-0 pt-4">
