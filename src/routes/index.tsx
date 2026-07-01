@@ -15,6 +15,11 @@ import {
   FileSpreadsheet,
   X,
   Check,
+  Percent,
+  Settings2,
+  Tag,
+  Trash2,
+  Plus,
 } from "lucide-react";
 
 import {
@@ -24,11 +29,17 @@ import {
   matchCsvWithAI,
   exportProductsCsv,
   applyCsvUpdates,
+  listProductMetafields,
+  saveProductMetafields,
+  bulkAdjustPrices,
+  previewSpecPricing,
   type AdminProduct,
   type AdminVariant,
   type ProductUpdateInput,
   type VariantUpdateInput,
   type BulkSuggestion,
+  type ProductMetafield,
+  type SpecRules,
 } from "@/lib/shopify.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
