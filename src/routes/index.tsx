@@ -444,13 +444,14 @@ function EditDialog({
         </DialogHeader>
 
         <Tabs defaultValue="basic" className="mt-2">
-          <TabsList className="grid grid-cols-4 w-full">
+          <TabsList className="grid grid-cols-5 w-full">
             <TabsTrigger value="basic">الأساسي</TabsTrigger>
             <TabsTrigger value="variants">
               المتغيرات {variants.length > 1 ? `(${variants.length})` : ""}
             </TabsTrigger>
             <TabsTrigger value="tags">Tags &amp; بيانات</TabsTrigger>
             <TabsTrigger value="seo">SEO</TabsTrigger>
+            <TabsTrigger value="meta">Metafields</TabsTrigger>
           </TabsList>
 
           <TabsContent value="basic" className="space-y-4 mt-4">
