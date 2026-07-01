@@ -249,6 +249,7 @@ function ProductsDashboard() {
       <EditDialog product={editing} onOpenChange={(o) => !o && setEditing(null)} />
       <BulkAiDialog open={bulkOpen} onOpenChange={setBulkOpen} />
       <SheetDialog open={sheetOpen} onOpenChange={setSheetOpen} />
+      <PricingToolsDialog open={pricingOpen} onOpenChange={setPricingOpen} />
     </div>
   );
 }
