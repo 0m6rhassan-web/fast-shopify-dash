@@ -8,6 +8,15 @@ export type AdminVariant = {
   compareAtPrice: string | null;
   inventoryItemId: string | null;
   inventoryQuantity: number;
+  barcode: string | null;
+  taxable: boolean;
+  weight: number | null;
+  weightUnit: string | null;
+  requiresShipping: boolean;
+  option1: string | null;
+  option2: string | null;
+  option3: string | null;
+  imageUrl: string | null;
 };
 
 export type AdminProduct = {
@@ -38,11 +47,17 @@ const LIST_QUERY = /* GraphQL */ `
           seo { title description }
           totalInventory
           featuredImage { url altText }
-          variants(first: 50) {
+          variants(first: 100) {
             edges {
               node {
-                id title sku price compareAtPrice inventoryQuantity
-                inventoryItem { id }
+                id title sku price compareAtPrice inventoryQuantity barcode taxable
+                selectedOptions { name value }
+                image { url }
+                inventoryItem {
+                  id
+                  requiresShipping
+                  measurement { weight { value unit } }
+                }
               }
             }
           }
@@ -55,15 +70,27 @@ const LIST_QUERY = /* GraphQL */ `
 `;
 
 function mapProduct(node: any): AdminProduct {
-  const variants: AdminVariant[] = (node.variants?.edges ?? []).map((e: any) => ({
-    id: e.node.id,
-    title: e.node.title,
-    sku: e.node.sku ?? null,
-    price: e.node.price,
-    compareAtPrice: e.node.compareAtPrice ?? null,
-    inventoryItemId: e.node.inventoryItem?.id ?? null,
-    inventoryQuantity: e.node.inventoryQuantity ?? 0,
-  }));
+  const variants: AdminVariant[] = (node.variants?.edges ?? []).map((e: any) => {
+    const opts: Array<{ name: string; value: string }> = e.node.selectedOptions ?? [];
+    return {
+      id: e.node.id,
+      title: e.node.title,
+      sku: e.node.sku ?? null,
+      price: e.node.price,
+      compareAtPrice: e.node.compareAtPrice ?? null,
+      inventoryItemId: e.node.inventoryItem?.id ?? null,
+      inventoryQuantity: e.node.inventoryQuantity ?? 0,
+      barcode: e.node.barcode ?? null,
+      taxable: e.node.taxable ?? true,
+      weight: e.node.inventoryItem?.measurement?.weight?.value ?? null,
+      weightUnit: e.node.inventoryItem?.measurement?.weight?.unit ?? null,
+      requiresShipping: e.node.inventoryItem?.requiresShipping ?? true,
+      option1: opts[0]?.value ?? null,
+      option2: opts[1]?.value ?? null,
+      option3: opts[2]?.value ?? null,
+      imageUrl: e.node.image?.url ?? null,
+    };
+  });
   return {
     id: node.id,
     title: node.title,
