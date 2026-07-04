@@ -622,29 +622,36 @@ export const applyCsvUpdates = createServerFn({ method: "POST" })
         const ch: VariantUpdateInput = { id: vid };
         let changed = false;
         const price = get(r, "price");
-        if (price) {
-          ch.price = price;
-          changed = true;
-        }
+        if (price) { ch.price = price; changed = true; }
         const cap = get(r, "compare_at_price");
-        if (cap !== undefined) {
-          ch.compareAtPrice = cap === "" ? null : cap;
-          changed = true;
-        }
+        if (cap !== undefined) { ch.compareAtPrice = cap === "" ? null : cap; changed = true; }
         const sku = get(r, "sku");
-        if (sku !== undefined) {
-          ch.sku = sku;
-          changed = true;
+        if (sku !== undefined) { ch.sku = sku; changed = true; }
+        const barcode = get(r, "barcode");
+        if (barcode !== undefined) { ch.barcode = barcode; changed = true; }
+        const taxable = get(r, "taxable");
+        if (taxable !== undefined && taxable !== "") {
+          ch.taxable = /^(true|1|yes)$/i.test(taxable); changed = true;
+        }
+        const reqShip = get(r, "requires_shipping");
+        if (reqShip !== undefined && reqShip !== "") {
+          ch.requiresShipping = /^(true|1|yes)$/i.test(reqShip); changed = true;
+        }
+        const weight = get(r, "weight");
+        if (weight !== undefined && weight !== "") {
+          const w = parseFloat(weight);
+          if (!Number.isNaN(w)) {
+            ch.weight = w;
+            const wu = (get(r, "weight_unit") || "").toUpperCase();
+            if (["GRAMS", "KILOGRAMS", "OUNCES", "POUNDS"].includes(wu)) ch.weightUnit = wu as any;
+            changed = true;
+          }
         }
         const qty = get(r, "inventory_quantity");
         const iid = get(r, "inventory_item_id");
         if (qty !== undefined && qty !== "" && iid) {
           const n = parseInt(qty, 10);
-          if (!Number.isNaN(n)) {
-            ch.inventoryQuantity = n;
-            ch.inventoryItemId = iid;
-            changed = true;
-          }
+          if (!Number.isNaN(n)) { ch.inventoryQuantity = n; ch.inventoryItemId = iid; changed = true; }
         }
         if (changed) vChanges.push(ch);
       }
