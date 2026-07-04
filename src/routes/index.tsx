@@ -152,25 +152,46 @@ function ProductsDashboard() {
       <main className="mx-auto max-w-7xl px-6 py-6 space-y-6">
         <Card>
           <CardHeader className="pb-4">
-            <CardTitle className="text-base">البحث والفلترة</CardTitle>
-            <CardDescription>ابحث بالاسم أو الـ SKU، وفلتر حسب حالة المخزون</CardDescription>
+            <CardTitle className="text-base">الفلترة</CardTitle>
+            <CardDescription>افتراضياً يعرض المنتجات النشطة فقط. غيّر الحالة أو ابحث بالاسم/SKU.</CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col sm:flex-row gap-3">
-            <div className="relative flex-1">
-              <Search className="size-4 absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                placeholder="ابحث بالاسم أو SKU..."
-                className="pr-9"
-              />
+          <CardContent className="space-y-3">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="relative flex-1">
+                <Search className="size-4 absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  placeholder="ابحث بالاسم أو SKU..."
+                  className="pr-9"
+                />
+              </div>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-xs text-muted-foreground ml-1">الحالة:</span>
+              {(
+                [
+                  { key: "ACTIVE", label: "نشط" },
+                  { key: "DRAFT", label: "مسودة" },
+                  { key: "ARCHIVED", label: "مؤرشف" },
+                  { key: "ALL", label: "الكل" },
+                ] as const
+              ).map((f) => (
+                <Button
+                  key={f.key}
+                  variant={statusFilter === f.key ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setStatusFilter(f.key)}
+                >
+                  {f.label}
+                </Button>
+              ))}
+              <span className="text-xs text-muted-foreground ml-1 mr-3">المخزون:</span>
               {(
                 [
                   { key: "all", label: "الكل" },
                   { key: "in", label: "متوفر" },
-                  { key: "low", label: "كمية منخفضة" },
+                  { key: "low", label: "منخفض" },
                   { key: "out", label: "نفذ" },
                 ] as const
               ).map((f) => (
