@@ -88,6 +88,7 @@ function useDebounced<T>(value: T, delay = 400): T {
 function ProductsDashboard() {
   const [searchInput, setSearchInput] = useState("");
   const search = useDebounced(searchInput, 400);
+  const [statusFilter, setStatusFilter] = useState<"ACTIVE" | "DRAFT" | "ARCHIVED" | "ALL">("ACTIVE");
   const [stockFilter, setStockFilter] = useState<"all" | "in" | "low" | "out">("all");
   const [editing, setEditing] = useState<AdminProduct | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -95,8 +96,8 @@ function ProductsDashboard() {
 
   const listFn = useServerFn(listProducts);
   const query = useQuery({
-    queryKey: ["products", search],
-    queryFn: () => listFn({ data: { search, limit: 50 } }),
+    queryKey: ["products", search, statusFilter],
+    queryFn: () => listFn({ data: { search, limit: 50, status: statusFilter } }),
     placeholderData: keepPreviousData,
   });
 
