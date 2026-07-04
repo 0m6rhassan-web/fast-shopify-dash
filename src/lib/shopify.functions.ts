@@ -694,7 +694,15 @@ export const applyCsvUpdates = createServerFn({ method: "POST" })
               const o: any = { id: v.id };
               if (v.price !== undefined) o.price = v.price;
               if (v.compareAtPrice !== undefined) o.compareAtPrice = v.compareAtPrice;
-              if (v.sku !== undefined) o.inventoryItem = { sku: v.sku };
+              if (v.barcode !== undefined) o.barcode = v.barcode;
+              if (v.taxable !== undefined) o.taxable = v.taxable;
+              const inv: any = {};
+              if (v.sku !== undefined) inv.sku = v.sku;
+              if (v.requiresShipping !== undefined) inv.requiresShipping = v.requiresShipping;
+              if (v.weight !== undefined) {
+                inv.measurement = { weight: { value: v.weight, unit: v.weightUnit ?? "KILOGRAMS" } };
+              }
+              if (Object.keys(inv).length) o.inventoryItem = inv;
               return Object.keys(o).length > 1 ? o : null;
             })
             .filter(Boolean);
