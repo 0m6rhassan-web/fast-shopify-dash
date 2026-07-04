@@ -8,6 +8,15 @@ export type AdminVariant = {
   compareAtPrice: string | null;
   inventoryItemId: string | null;
   inventoryQuantity: number;
+  barcode: string | null;
+  taxable: boolean;
+  weight: number | null;
+  weightUnit: string | null;
+  requiresShipping: boolean;
+  option1: string | null;
+  option2: string | null;
+  option3: string | null;
+  imageUrl: string | null;
 };
 
 export type AdminProduct = {
