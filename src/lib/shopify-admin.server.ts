@@ -5,9 +5,16 @@ function shopDomain() {
   return d;
 }
 
+function resolveToken(): string | undefined {
+  // Prefer per-user online access token (issued via Shopify OAuth), fallback to app token.
+  const onlineKey = Object.keys(process.env).find((k) => k.startsWith("SHOPIFY_ONLINE_ACCESS_TOKEN"));
+  if (onlineKey && process.env[onlineKey]) return process.env[onlineKey];
+  return process.env.SHOPIFY_ACCESS_TOKEN;
+}
+
 export async function adminGraphQL<T = any>(query: string, variables: Record<string, any> = {}): Promise<T> {
-  const token = process.env.SHOPIFY_ACCESS_TOKEN;
-  if (!token) throw new Error("SHOPIFY_ACCESS_TOKEN is not configured");
+  const token = resolveToken();
+  if (!token) throw new Error("Shopify access token is not configured");
 
   const url = `https://${shopDomain()}/admin/api/${API_VERSION}/graphql.json`;
   const res = await fetch(url, {
