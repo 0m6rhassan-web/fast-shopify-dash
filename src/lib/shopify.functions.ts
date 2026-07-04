@@ -451,71 +451,101 @@ const CSV_HEADERS = [
   "seo_title",
   "seo_description",
   "description_html",
+  "featured_image",
   "variant_title",
   "sku",
+  "barcode",
   "price",
   "compare_at_price",
   "inventory_quantity",
+  "taxable",
+  "requires_shipping",
+  "weight",
+  "weight_unit",
+  "option1",
+  "option2",
+  "option3",
+  "variant_image",
 ] as const;
 
 export const exportProductsCsv = createServerFn({ method: "POST" })
-  .inputValidator((data: { search?: string; max?: number } | undefined) => data ?? {})
+  .inputValidator(
+    (data: { search?: string; max?: number; status?: "ACTIVE" | "DRAFT" | "ARCHIVED" | "ALL" } | undefined) => data ?? {},
+  )
   .handler(async ({ data }) => {
     const { adminGraphQL } = await import("./shopify-admin.server");
     const Papa = (await import("papaparse")).default;
     const max = Math.min(data.max ?? 500, 2000);
     const search = (data.search ?? "").trim();
-    const query = search
-      ? `title:*${search.replace(/"/g, '\\"')}* OR sku:*${search.replace(/"/g, '\\"')}*`
-      : null;
+    const status = data.status ?? "ACTIVE";
+    const parts: string[] = [];
+    if (search) {
+      const esc = search.replace(/"/g, '\\"');
+      parts.push(`(title:*${esc}* OR sku:*${esc}*)`);
+    }
+    if (status !== "ALL") parts.push(`status:${status.toLowerCase()}`);
+    const query: string | null = parts.length ? parts.join(" AND ") : null;
 
-    const rows: Record<string, string | number> [] = [];
+    const rows: Record<string, string | number>[] = [];
     let after: string | null = null;
     while (rows.length < max) {
       const pageSize = Math.min(50, max - rows.length);
       const res: any = await adminGraphQL<any>(LIST_QUERY, { first: pageSize, query, after });
       for (const e of res.products.edges) {
         const p = mapProduct(e.node);
+        const baseRow = {
+          product_id: p.id,
+          handle: p.handle,
+          title: p.title,
+          vendor: p.vendor,
+          product_type: p.productType,
+          status: p.status,
+          tags: p.tags.join(", "),
+          seo_title: p.seoTitle,
+          seo_description: p.seoDescription,
+          description_html: p.descriptionHtml,
+          featured_image: p.featuredImage ?? "",
+        };
         if (p.variants.length === 0) {
           rows.push({
-            product_id: p.id,
+            ...baseRow,
             variant_id: "",
             inventory_item_id: "",
-            handle: p.handle,
-            title: p.title,
-            vendor: p.vendor,
-            product_type: p.productType,
-            status: p.status,
-            tags: p.tags.join(", "),
-            seo_title: p.seoTitle,
-            seo_description: p.seoDescription,
-            description_html: p.descriptionHtml,
             variant_title: "",
             sku: "",
+            barcode: "",
             price: "",
             compare_at_price: "",
             inventory_quantity: "",
+            taxable: "",
+            requires_shipping: "",
+            weight: "",
+            weight_unit: "",
+            option1: "",
+            option2: "",
+            option3: "",
+            variant_image: "",
           });
         } else {
           for (const v of p.variants) {
             rows.push({
-              product_id: p.id,
+              ...baseRow,
               variant_id: v.id,
               inventory_item_id: v.inventoryItemId ?? "",
-              handle: p.handle,
-              title: p.title,
-              vendor: p.vendor,
-              product_type: p.productType,
-              status: p.status,
-              tags: p.tags.join(", "),
-              seo_title: p.seoTitle,
-              seo_description: p.seoDescription,
-              description_html: p.descriptionHtml,
               variant_title: v.title,
               sku: v.sku ?? "",
+              barcode: v.barcode ?? "",
               price: v.price,
               compare_at_price: v.compareAtPrice ?? "",
               inventory_quantity: v.inventoryQuantity,
+              taxable: v.taxable ? "true" : "false",
+              requires_shipping: v.requiresShipping ? "true" : "false",
+              weight: v.weight ?? "",
+              weight_unit: v.weightUnit ?? "",
+              option1: v.option1 ?? "",
+              option2: v.option2 ?? "",
+              option3: v.option3 ?? "",
+              variant_image: v.imageUrl ?? "",
             });
           }
         }
@@ -527,6 +557,7 @@ export const exportProductsCsv = createServerFn({ method: "POST" })
     const csv = Papa.unparse(rows, { columns: [...CSV_HEADERS] });
     return { csv, productCount: new Set(rows.map((r) => r.product_id)).size, rowCount: rows.length };
   });
+
 
 type CsvUpdateRow = Record<string, string>;
 
