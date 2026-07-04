@@ -112,17 +112,20 @@ function mapProduct(node: any): AdminProduct {
 
 export const listProducts = createServerFn({ method: "POST" })
   .inputValidator(
-    (data: { search?: string; cursor?: string | null; limit?: number } | undefined) => data ?? {},
+    (data: { search?: string; cursor?: string | null; limit?: number; status?: "ACTIVE" | "DRAFT" | "ARCHIVED" | "ALL" } | undefined) => data ?? {},
   )
   .handler(async ({ data }) => {
     const { adminGraphQL } = await import("./shopify-admin.server");
     const limit = Math.min(Math.max(data.limit ?? 25, 1), 50);
     const search = (data.search ?? "").trim();
-    let query: string | null = null;
+    const status = data.status ?? "ACTIVE";
+    const parts: string[] = [];
     if (search) {
       const escaped = search.replace(/"/g, '\\"');
-      query = `title:*${escaped}* OR sku:*${escaped}*`;
+      parts.push(`(title:*${escaped}* OR sku:*${escaped}*)`);
     }
+    if (status !== "ALL") parts.push(`status:${status.toLowerCase()}`);
+    const query: string | null = parts.length ? parts.join(" AND ") : null;
     const res = await adminGraphQL<any>(LIST_QUERY, {
       first: limit,
       query,
@@ -166,6 +169,11 @@ export type VariantUpdateInput = {
   sku?: string;
   inventoryItemId?: string;
   inventoryQuantity?: number;
+  barcode?: string;
+  taxable?: boolean;
+  weight?: number;
+  weightUnit?: "GRAMS" | "KILOGRAMS" | "OUNCES" | "POUNDS";
+  requiresShipping?: boolean;
 };
 
 export type ProductUpdateInput = {
@@ -186,7 +194,6 @@ export const updateProduct = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { adminGraphQL, getPrimaryLocationId } = await import("./shopify-admin.server");
 
-    // 1) Product-level fields
     const hasProductFields =
       data.title !== undefined ||
       data.descriptionHtml !== undefined ||
@@ -216,13 +223,22 @@ export const updateProduct = createServerFn({ method: "POST" })
       if (errs.length) throw new Error(errs.map((e: any) => e.message).join(", "));
     }
 
-    // 2) Variants (price / compareAtPrice / sku)
     const variantPayloads = (data.variants ?? [])
       .map((v) => {
         const o: any = { id: v.id };
         if (v.price !== undefined) o.price = v.price;
         if (v.compareAtPrice !== undefined) o.compareAtPrice = v.compareAtPrice;
-        if (v.sku !== undefined) o.inventoryItem = { sku: v.sku };
+        if (v.barcode !== undefined) o.barcode = v.barcode;
+        if (v.taxable !== undefined) o.taxable = v.taxable;
+        const inv: any = {};
+        if (v.sku !== undefined) inv.sku = v.sku;
+        if (v.requiresShipping !== undefined) inv.requiresShipping = v.requiresShipping;
+        if (v.weight !== undefined) {
+          inv.measurement = {
+            weight: { value: v.weight, unit: v.weightUnit ?? "KILOGRAMS" },
+          };
+        }
+        if (Object.keys(inv).length) o.inventoryItem = inv;
         return Object.keys(o).length > 1 ? o : null;
       })
       .filter(Boolean);
@@ -435,71 +451,101 @@ const CSV_HEADERS = [
   "seo_title",
   "seo_description",
   "description_html",
+  "featured_image",
   "variant_title",
   "sku",
+  "barcode",
   "price",
   "compare_at_price",
   "inventory_quantity",
+  "taxable",
+  "requires_shipping",
+  "weight",
+  "weight_unit",
+  "option1",
+  "option2",
+  "option3",
+  "variant_image",
 ] as const;
 
 export const exportProductsCsv = createServerFn({ method: "POST" })
-  .inputValidator((data: { search?: string; max?: number } | undefined) => data ?? {})
+  .inputValidator(
+    (data: { search?: string; max?: number; status?: "ACTIVE" | "DRAFT" | "ARCHIVED" | "ALL" } | undefined) => data ?? {},
+  )
   .handler(async ({ data }) => {
     const { adminGraphQL } = await import("./shopify-admin.server");
     const Papa = (await import("papaparse")).default;
     const max = Math.min(data.max ?? 500, 2000);
     const search = (data.search ?? "").trim();
-    const query = search
-      ? `title:*${search.replace(/"/g, '\\"')}* OR sku:*${search.replace(/"/g, '\\"')}*`
-      : null;
+    const status = data.status ?? "ACTIVE";
+    const parts: string[] = [];
+    if (search) {
+      const esc = search.replace(/"/g, '\\"');
+      parts.push(`(title:*${esc}* OR sku:*${esc}*)`);
+    }
+    if (status !== "ALL") parts.push(`status:${status.toLowerCase()}`);
+    const query: string | null = parts.length ? parts.join(" AND ") : null;
 
-    const rows: Record<string, string | number> [] = [];
+    const rows: Record<string, string | number>[] = [];
     let after: string | null = null;
     while (rows.length < max) {
       const pageSize = Math.min(50, max - rows.length);
       const res: any = await adminGraphQL<any>(LIST_QUERY, { first: pageSize, query, after });
       for (const e of res.products.edges) {
         const p = mapProduct(e.node);
+        const baseRow = {
+          product_id: p.id,
+          handle: p.handle,
+          title: p.title,
+          vendor: p.vendor,
+          product_type: p.productType,
+          status: p.status,
+          tags: p.tags.join(", "),
+          seo_title: p.seoTitle,
+          seo_description: p.seoDescription,
+          description_html: p.descriptionHtml,
+          featured_image: p.featuredImage ?? "",
+        };
         if (p.variants.length === 0) {
           rows.push({
-            product_id: p.id,
+            ...baseRow,
             variant_id: "",
             inventory_item_id: "",
-            handle: p.handle,
-            title: p.title,
-            vendor: p.vendor,
-            product_type: p.productType,
-            status: p.status,
-            tags: p.tags.join(", "),
-            seo_title: p.seoTitle,
-            seo_description: p.seoDescription,
-            description_html: p.descriptionHtml,
             variant_title: "",
             sku: "",
+            barcode: "",
             price: "",
             compare_at_price: "",
             inventory_quantity: "",
+            taxable: "",
+            requires_shipping: "",
+            weight: "",
+            weight_unit: "",
+            option1: "",
+            option2: "",
+            option3: "",
+            variant_image: "",
           });
         } else {
           for (const v of p.variants) {
             rows.push({
-              product_id: p.id,
+              ...baseRow,
               variant_id: v.id,
               inventory_item_id: v.inventoryItemId ?? "",
-              handle: p.handle,
-              title: p.title,
-              vendor: p.vendor,
-              product_type: p.productType,
-              status: p.status,
-              tags: p.tags.join(", "),
-              seo_title: p.seoTitle,
-              seo_description: p.seoDescription,
-              description_html: p.descriptionHtml,
               variant_title: v.title,
               sku: v.sku ?? "",
+              barcode: v.barcode ?? "",
               price: v.price,
               compare_at_price: v.compareAtPrice ?? "",
               inventory_quantity: v.inventoryQuantity,
+              taxable: v.taxable ? "true" : "false",
+              requires_shipping: v.requiresShipping ? "true" : "false",
+              weight: v.weight ?? "",
+              weight_unit: v.weightUnit ?? "",
+              option1: v.option1 ?? "",
+              option2: v.option2 ?? "",
+              option3: v.option3 ?? "",
+              variant_image: v.imageUrl ?? "",
             });
           }
         }
@@ -511,6 +557,7 @@ export const exportProductsCsv = createServerFn({ method: "POST" })
     const csv = Papa.unparse(rows, { columns: [...CSV_HEADERS] });
     return { csv, productCount: new Set(rows.map((r) => r.product_id)).size, rowCount: rows.length };
   });
+
 
 type CsvUpdateRow = Record<string, string>;
 
@@ -575,29 +622,36 @@ export const applyCsvUpdates = createServerFn({ method: "POST" })
         const ch: VariantUpdateInput = { id: vid };
         let changed = false;
         const price = get(r, "price");
-        if (price) {
-          ch.price = price;
-          changed = true;
-        }
+        if (price) { ch.price = price; changed = true; }
         const cap = get(r, "compare_at_price");
-        if (cap !== undefined) {
-          ch.compareAtPrice = cap === "" ? null : cap;
-          changed = true;
-        }
+        if (cap !== undefined) { ch.compareAtPrice = cap === "" ? null : cap; changed = true; }
         const sku = get(r, "sku");
-        if (sku !== undefined) {
-          ch.sku = sku;
-          changed = true;
+        if (sku !== undefined) { ch.sku = sku; changed = true; }
+        const barcode = get(r, "barcode");
+        if (barcode !== undefined) { ch.barcode = barcode; changed = true; }
+        const taxable = get(r, "taxable");
+        if (taxable !== undefined && taxable !== "") {
+          ch.taxable = /^(true|1|yes)$/i.test(taxable); changed = true;
+        }
+        const reqShip = get(r, "requires_shipping");
+        if (reqShip !== undefined && reqShip !== "") {
+          ch.requiresShipping = /^(true|1|yes)$/i.test(reqShip); changed = true;
+        }
+        const weight = get(r, "weight");
+        if (weight !== undefined && weight !== "") {
+          const w = parseFloat(weight);
+          if (!Number.isNaN(w)) {
+            ch.weight = w;
+            const wu = (get(r, "weight_unit") || "").toUpperCase();
+            if (["GRAMS", "KILOGRAMS", "OUNCES", "POUNDS"].includes(wu)) ch.weightUnit = wu as any;
+            changed = true;
+          }
         }
         const qty = get(r, "inventory_quantity");
         const iid = get(r, "inventory_item_id");
         if (qty !== undefined && qty !== "" && iid) {
           const n = parseInt(qty, 10);
-          if (!Number.isNaN(n)) {
-            ch.inventoryQuantity = n;
-            ch.inventoryItemId = iid;
-            changed = true;
-          }
+          if (!Number.isNaN(n)) { ch.inventoryQuantity = n; ch.inventoryItemId = iid; changed = true; }
         }
         if (changed) vChanges.push(ch);
       }
@@ -640,7 +694,15 @@ export const applyCsvUpdates = createServerFn({ method: "POST" })
               const o: any = { id: v.id };
               if (v.price !== undefined) o.price = v.price;
               if (v.compareAtPrice !== undefined) o.compareAtPrice = v.compareAtPrice;
-              if (v.sku !== undefined) o.inventoryItem = { sku: v.sku };
+              if (v.barcode !== undefined) o.barcode = v.barcode;
+              if (v.taxable !== undefined) o.taxable = v.taxable;
+              const inv: any = {};
+              if (v.sku !== undefined) inv.sku = v.sku;
+              if (v.requiresShipping !== undefined) inv.requiresShipping = v.requiresShipping;
+              if (v.weight !== undefined) {
+                inv.measurement = { weight: { value: v.weight, unit: v.weightUnit ?? "KILOGRAMS" } };
+              }
+              if (Object.keys(inv).length) o.inventoryItem = inv;
               return Object.keys(o).length > 1 ? o : null;
             })
             .filter(Boolean);
