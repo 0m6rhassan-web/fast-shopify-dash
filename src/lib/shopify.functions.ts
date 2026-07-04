@@ -166,6 +166,11 @@ export type VariantUpdateInput = {
   sku?: string;
   inventoryItemId?: string;
   inventoryQuantity?: number;
+  barcode?: string;
+  taxable?: boolean;
+  weight?: number;
+  weightUnit?: "GRAMS" | "KILOGRAMS" | "OUNCES" | "POUNDS";
+  requiresShipping?: boolean;
 };
 
 export type ProductUpdateInput = {
@@ -186,7 +191,6 @@ export const updateProduct = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { adminGraphQL, getPrimaryLocationId } = await import("./shopify-admin.server");
 
-    // 1) Product-level fields
     const hasProductFields =
       data.title !== undefined ||
       data.descriptionHtml !== undefined ||
@@ -216,13 +220,22 @@ export const updateProduct = createServerFn({ method: "POST" })
       if (errs.length) throw new Error(errs.map((e: any) => e.message).join(", "));
     }
 
-    // 2) Variants (price / compareAtPrice / sku)
     const variantPayloads = (data.variants ?? [])
       .map((v) => {
         const o: any = { id: v.id };
         if (v.price !== undefined) o.price = v.price;
         if (v.compareAtPrice !== undefined) o.compareAtPrice = v.compareAtPrice;
-        if (v.sku !== undefined) o.inventoryItem = { sku: v.sku };
+        if (v.barcode !== undefined) o.barcode = v.barcode;
+        if (v.taxable !== undefined) o.taxable = v.taxable;
+        const inv: any = {};
+        if (v.sku !== undefined) inv.sku = v.sku;
+        if (v.requiresShipping !== undefined) inv.requiresShipping = v.requiresShipping;
+        if (v.weight !== undefined) {
+          inv.measurement = {
+            weight: { value: v.weight, unit: v.weightUnit ?? "KILOGRAMS" },
+          };
+        }
+        if (Object.keys(inv).length) o.inventoryItem = inv;
         return Object.keys(o).length > 1 ? o : null;
       })
       .filter(Boolean);
