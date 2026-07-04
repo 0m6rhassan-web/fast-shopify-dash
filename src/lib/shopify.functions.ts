@@ -112,17 +112,20 @@ function mapProduct(node: any): AdminProduct {
 
 export const listProducts = createServerFn({ method: "POST" })
   .inputValidator(
-    (data: { search?: string; cursor?: string | null; limit?: number } | undefined) => data ?? {},
+    (data: { search?: string; cursor?: string | null; limit?: number; status?: "ACTIVE" | "DRAFT" | "ARCHIVED" | "ALL" } | undefined) => data ?? {},
   )
   .handler(async ({ data }) => {
     const { adminGraphQL } = await import("./shopify-admin.server");
     const limit = Math.min(Math.max(data.limit ?? 25, 1), 50);
     const search = (data.search ?? "").trim();
-    let query: string | null = null;
+    const status = data.status ?? "ACTIVE";
+    const parts: string[] = [];
     if (search) {
       const escaped = search.replace(/"/g, '\\"');
-      query = `title:*${escaped}* OR sku:*${escaped}*`;
+      parts.push(`(title:*${escaped}* OR sku:*${escaped}*)`);
     }
+    if (status !== "ALL") parts.push(`status:${status.toLowerCase()}`);
+    const query: string | null = parts.length ? parts.join(" AND ") : null;
     const res = await adminGraphQL<any>(LIST_QUERY, {
       first: limit,
       query,
