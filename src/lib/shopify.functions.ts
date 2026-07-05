@@ -69,6 +69,33 @@ const LIST_QUERY = /* GraphQL */ `
   }
 `;
 
+const STOREFRONT_LIST_QUERY = /* GraphQL */ `
+  query ListStorefrontProducts($first: Int!, $query: String, $after: String) {
+    products(first: $first, query: $query, after: $after, sortKey: UPDATED_AT, reverse: true) {
+      pageInfo { hasNextPage endCursor }
+      edges {
+        node {
+          id title handle descriptionHtml vendor productType tags
+          seo { title description }
+          featuredImage { url altText }
+          priceRange { minVariantPrice { amount currencyCode } }
+          variants(first: 100) {
+            edges {
+              node {
+                id title sku availableForSale requiresShipping
+                price { amount currencyCode }
+                compareAtPrice { amount currencyCode }
+                selectedOptions { name value }
+                image { url }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
 function mapProduct(node: any): AdminProduct {
   const variants: AdminVariant[] = (node.variants?.edges ?? []).map((e: any) => {
     const opts: Array<{ name: string; value: string }> = e.node.selectedOptions ?? [];
@@ -110,15 +137,70 @@ function mapProduct(node: any): AdminProduct {
   };
 }
 
+function mapStorefrontProduct(node: any): AdminProduct {
+  const variants: AdminVariant[] = (node.variants?.edges ?? []).map((e: any) => {
+    const opts: Array<{ name: string; value: string }> = e.node.selectedOptions ?? [];
+    return {
+      id: e.node.id,
+      title: e.node.title,
+      sku: e.node.sku ?? null,
+      price: e.node.price?.amount ?? "",
+      compareAtPrice: e.node.compareAtPrice?.amount ?? null,
+      inventoryItemId: null,
+      inventoryQuantity: e.node.availableForSale ? 1 : 0,
+      barcode: null,
+      taxable: true,
+      weight: null,
+      weightUnit: null,
+      requiresShipping: e.node.requiresShipping ?? true,
+      option1: opts[0]?.value ?? null,
+      option2: opts[1]?.value ?? null,
+      option3: opts[2]?.value ?? null,
+      imageUrl: e.node.image?.url ?? null,
+    };
+  });
+  return {
+    id: node.id,
+    title: node.title,
+    handle: node.handle,
+    descriptionHtml: node.descriptionHtml ?? "",
+    status: "ACTIVE",
+    vendor: node.vendor ?? "",
+    productType: node.productType ?? "",
+    tags: node.tags ?? [],
+    seoTitle: node.seo?.title ?? "",
+    seoDescription: node.seo?.description ?? "",
+    featuredImage: node.featuredImage?.url ?? null,
+    totalInventory: variants.filter((v) => v.inventoryQuantity > 0).length,
+    currencyCode: node.priceRange?.minVariantPrice?.currencyCode ?? "USD",
+    variants,
+    variantCount: variants.length,
+  };
+}
+
 export const listProducts = createServerFn({ method: "POST" })
   .inputValidator(
     (data: { search?: string; cursor?: string | null; limit?: number; status?: "ACTIVE" | "DRAFT" | "ARCHIVED" | "ALL" } | undefined) => data ?? {},
   )
   .handler(async ({ data }) => {
-    const { adminGraphQL } = await import("./shopify-admin.server");
     const limit = Math.min(Math.max(data.limit ?? 25, 1), 50);
     const search = (data.search ?? "").trim();
     const status = data.status ?? "ACTIVE";
+    if (status === "ACTIVE") {
+      const { storefrontGraphQL } = await import("./shopify-admin.server");
+      const res = await storefrontGraphQL<any>(STOREFRONT_LIST_QUERY, {
+        first: limit,
+        query: search || null,
+        after: data.cursor ?? null,
+      });
+      const products: AdminProduct[] = res.products.edges.map((e: any) => mapStorefrontProduct(e.node));
+      return {
+        products,
+        pageInfo: res.products.pageInfo as { hasNextPage: boolean; endCursor: string | null },
+      };
+    }
+
+    const { adminGraphQL } = await import("./shopify-admin.server");
     const parts: string[] = [];
     if (search) {
       const escaped = search.replace(/"/g, '\\"');

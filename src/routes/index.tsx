@@ -88,7 +88,7 @@ function useDebounced<T>(value: T, delay = 400): T {
 function ProductsDashboard() {
   const [searchInput, setSearchInput] = useState("");
   const search = useDebounced(searchInput, 400);
-  const [statusFilter, setStatusFilter] = useState<"ACTIVE" | "DRAFT" | "ARCHIVED" | "ALL">("ACTIVE");
+  const statusFilter = "ACTIVE" as const;
   const [stockFilter, setStockFilter] = useState<"all" | "in" | "low" | "out">("all");
   const [editing, setEditing] = useState<AdminProduct | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -169,23 +169,7 @@ function ProductsDashboard() {
             </div>
             <div className="flex flex-wrap gap-2 items-center">
               <span className="text-xs text-muted-foreground ml-1">الحالة:</span>
-              {(
-                [
-                  { key: "ACTIVE", label: "نشط" },
-                  { key: "DRAFT", label: "مسودة" },
-                  { key: "ARCHIVED", label: "مؤرشف" },
-                  { key: "ALL", label: "الكل" },
-                ] as const
-              ).map((f) => (
-                <Button
-                  key={f.key}
-                  variant={statusFilter === f.key ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setStatusFilter(f.key)}
-                >
-                  {f.label}
-                </Button>
-              ))}
+              <Badge variant="default">نشط فقط</Badge>
               <span className="text-xs text-muted-foreground ml-1 mr-3">المخزون:</span>
               {(
                 [

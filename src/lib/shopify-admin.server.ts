@@ -1,4 +1,6 @@
 const API_VERSION = "2025-07";
+const SHOPIFY_STOREFRONT_TOKEN =
+  process.env.SHOPIFY_STOREFRONT_ACCESS_TOKEN || "e3ab8c4c1e66bf32cdcfb396bab113ab";
 
 function shopDomain() {
   const d = process.env.SHOPIFY_STORE_PERMANENT_DOMAIN || "kasr-zero-mg.myshopify.com";
@@ -33,6 +35,31 @@ export async function adminGraphQL<T = any>(query: string, variables: Record<str
   const json = (await res.json()) as any;
   if (json.errors) {
     throw new Error(`Shopify GraphQL: ${JSON.stringify(json.errors).slice(0, 500)}`);
+  }
+  return json.data as T;
+}
+
+export async function storefrontGraphQL<T = any>(
+  query: string,
+  variables: Record<string, any> = {},
+): Promise<T> {
+  const url = `https://${shopDomain()}/api/${API_VERSION}/graphql.json`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shopify-Storefront-Access-Token": SHOPIFY_STOREFRONT_TOKEN,
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Shopify Storefront API ${res.status}: ${text.slice(0, 500)}`);
+  }
+  const json = (await res.json()) as any;
+  if (json.errors) {
+    throw new Error(`Shopify Storefront GraphQL: ${JSON.stringify(json.errors).slice(0, 500)}`);
   }
   return json.data as T;
 }
