@@ -172,7 +172,7 @@ function mapStorefrontProduct(node: any): AdminProduct {
     seoDescription: node.seo?.description ?? "",
     featuredImage: node.featuredImage?.url ?? null,
     totalInventory: variants.filter((v) => v.inventoryQuantity > 0).length,
-    currencyCode: node.priceRange?.minVariantPrice?.currencyCode ?? variants[0]?.price ?? "USD",
+    currencyCode: node.priceRange?.minVariantPrice?.currencyCode ?? "USD",
     variants,
     variantCount: variants.length,
   };
